@@ -464,12 +464,12 @@ def parse_query(head: SearchLogic, base_ids: set[int]) -> set[int]:
                 return game.notes
             case "desc" | "description":
                 return game.description
-            case "site" | "url":
+            case "site" | "url" | "link":
                 return game.url
-            case "imageurl":
+            case "imageurl" | "image_url":
                 return game.image_url
             # Date matches
-            case "added":
+            case "added" | "added_on":
                 return game.added_on.value
             case "updated":
                 return game.last_updated.value
