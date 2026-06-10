@@ -178,6 +178,9 @@ async def _launch_exe(executable: str):
     exe = pathlib.Path(executable)
     if globals.settings.default_exe_dir.get(globals.os) and not exe.is_absolute():
         exe = pathlib.Path(globals.settings.default_exe_dir.get(globals.os)) / exe
+    if globals.os is Os.MacOS and exe.suffix == ".app" and exe.is_dir():
+        await default_open(str(exe))
+        return
     if not exe.is_file():
         raise FileNotFoundError()
 

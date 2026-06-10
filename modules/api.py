@@ -90,6 +90,8 @@ f95_ratelimit_forum_errors = (
     b"<title>DDOS-GUARD</title>",
 )
 f95_temp_error_messages = (
+    b'<div id="cf-error-details" class="p-0">',
+    b"<b>504 - Gateway Timeout .</b>",
     b"<title>502 Bad Gateway</title>",
     b"<title>Error 502</title>",
     b"An unexpected error occurred. Please try again later.",
@@ -97,6 +99,10 @@ f95_temp_error_messages = (
     b"<!-- Connection refused -->",
     b"<!-- Too many connections -->",
     b"<p>Automated backups are currently executing. During this time, the site will be unavailable</p>",
+    b"<title>F95Zone :: Maintenance</title>",
+    b"<title>F95Zone :: Scheduled Maintenance</title>",
+    b'<script src="https://static.f95zone.to/assets/SamF95/ErrorPage',
+    b'<div class="blockMessage"><p>Please check back in 10 mins</p></div>',
 )
 
 api_host = os.environ.get("F95INDEXER_URL") or "https://api.f95checker.dev"
@@ -298,15 +304,30 @@ async def fetch(method: str, url: str, **kwargs):
 
 def raise_f95zone_error(res: bytes | dict, return_login=False):
     if isinstance(res, bytes):
-        if any(msg in res for msg in f95_login_error_messages):
-            if return_login:
-                return False
-            raise msgbox.Exc(
-                "Login expired",
-                "Your F95zone login session has expired,\n"
-                "press try again to login.",
-                MsgBox.warn
-            )
+        if b'<body data-template="error">' in res:
+            try:
+                html = parser.html(res)
+                message = (
+                    html.select_one(".p-body-pageContent .blockMessage")
+                    .get_text()
+                    .strip()
+                )
+            except Exception:
+                message = None
+            if message:
+                raise msgbox.Exc(
+                    "Forum error",
+                    "The F95zone Forum returned a temporary error with the following message:\n"
+                    f"{message}",
+                    MsgBox.error
+                )
+            else:
+                raise msgbox.Exc(
+                    "Forum error",
+                    "The F95zone Forum returned a temporary error that could not be parsed.",
+                    MsgBox.error,
+                    more=str(res)
+                )
         if any(msg in res for msg in f95_ratelimit_forum_errors):
             raise msgbox.Exc(
                 "Rate limit",
@@ -314,11 +335,20 @@ def raise_f95zone_error(res: bytes | dict, return_login=False):
                 "please try again later.",
                 MsgBox.warn
             )
-        if any(msg in res for msg in f95_temp_error_messages):
+        if any(msg in res for msg in f95_temp_error_messages) or not res:
             raise msgbox.Exc(
                 "Server downtime",
                 "F95zone servers are currently unreachable,\n"
                 "please retry in a few minutes.",
+                MsgBox.warn
+            )
+        if any(msg in res for msg in f95_login_error_messages):
+            if return_login:
+                return False
+            raise msgbox.Exc(
+                "Login expired",
+                "Your F95zone login session has expired,\n"
+                "press try again to login.",
                 MsgBox.warn
             )
         return True
@@ -768,8 +798,16 @@ async def fast_check(games: list[Game], full=False):
     for game in games:
         last_changed = last_changes.get(str(game.id), 0)
         assert last_changed > 0, "Invalid last_changed from fast check API"
+        check_new_enums = False
+        if globals.version != game.last_check_version:
+            check_new_enums = (
+                Tag.unknown in game.tags or
+                game.type is Type.Unknown or
+                game.status is Status.Unknown
+            )
 
         this_full = full or (
+            check_new_enums or
             game.status is Status.Unchecked or
             last_changed > game.last_full_check or
             (game.image.missing and (game.image_url.startswith("http") or not game.image_url)) or
@@ -823,15 +861,23 @@ async def full_check(game: Game, last_changed: int):
             url = f95_threads_page + str(game.id)
 
         # Redis only allows string values, so API only gives str for simplicity
-        thread["type"] = Type(int(thread["type"]))
-        thread["status"] = Status(int(thread["status"]))
+        thread["type"] = int(thread["type"])
+        if thread["type"] in Type:
+            thread["type"] = Type(thread["type"])
+        else:
+            thread["type"] = Type.Unknown
+        thread["status"] = int(thread["status"])
+        if thread["status"] in Status:
+            thread["status"] = Status(thread["status"])
+        else:
+            thread["status"] = Status.Unknown
         thread["last_updated"] = int(thread["last_updated"])
         thread["score"] = float(thread["score"])
         thread["votes"] = int(thread["votes"])
-        thread["tags"] = tuple(Tag(tag) for tag in json.loads(thread["tags"]))
+        thread["tags"] = tuple((Tag(tag) if tag in Tag else Tag.unknown) for tag in json.loads(thread["tags"]))
         thread["unknown_tags"] = json.loads(thread["unknown_tags"])
         thread["downloads"] = json.loads(thread["downloads"])
-        for label, links in thread["downloads"]:
+        for _, links in thread["downloads"]:
             for link_i, link_pair in enumerate(links):
                 links[link_i] = tuple(link_pair)
         thread["previews_urls"] = json.loads(thread.get("previews_urls", "[]"))
@@ -976,10 +1022,10 @@ async def full_check(game: Game, last_changed: int):
                         if changed_host:
                             continue
                         if not isinstance(exc.os_error, socket.gaierror):
-                            raise  # Not a dead link
+                            raise  # Not a dead host
                         if is_f95zone_url(image_url):
                             raise  # Not a foreign host, raise normal connection error message
-                        if check_host(f95_domain) and not check_host(get_url_domain(image_url)):
+                        if (await check_host(f95_domain)) and not (await check_host(get_url_domain(image_url))):
                             # Link is actually dead
                             thread["image_url"] = "dead"
                             res = b""
@@ -1211,33 +1257,27 @@ async def check_updates():
             dst = globals.self_path.parent.parent.absolute()  # F95Checker.app/Contents/MacOS
         pid = os.getpid()
         if globals.os is Os.Windows:
-            script = "\n".join((
-                "try {"
-                'Write-Host "Waiting for F95Checker to quit..."',
-                f"Wait-Process -Id {pid}",
-                'Write-Host "Sleeping 3 seconds..."',
-                "Start-Sleep -Seconds 3",
-                'Write-Host "Deleting old version files..."',
-                " | ".join((
-                    f'Get-ChildItem -Force -Recurse -Path "{dst}"',
-                    "Select-Object -ExpandProperty FullName",
-                    "Sort-Object -Property Length -Descending",
-                    "Remove-Item -Force -Recurse",
-                )),
-                'Write-Host "Moving new version files..."',
-                " | ".join((
-                    f'Get-ChildItem -Force -Path "{src}"',
-                    "Select-Object -ExpandProperty FullName",
-                    f'Move-Item -Force -Destination "{dst}"',
-                )),
-                'Write-Host "Sleeping 3 seconds..."',
-                "Start-Sleep -Seconds 3",
-                'Write-Host "Starting F95Checker..."',
-                f"& {globals.start_cmd}",
-                "} catch {",
-                'Write-Host "An error occurred:`n" $_.InvocationInfo.PositionMessage "`n" $_',
-                "}",
-            ))
+            script = f"""\
+try {{
+    Write-Host "Waiting for F95Checker to quit..."
+    try {{
+        Wait-Process -Id {pid}
+    }} catch {{
+        Write-Host "F95Checker seems to have already quit"
+    }}
+    Write-Host "Sleeping 3 seconds..."
+    Start-Sleep -Seconds 3
+    Write-Host "Deleting old version files..."
+    Get-ChildItem -Force -Recurse -Path "{dst}" | Select-Object -ExpandProperty FullName | Sort-Object -Property Length -Descending | Remove-Item -Force -Recurse
+    Write-Host "Moving new version files..."
+    Get-ChildItem -Force -Path "{src}" | Select-Object -ExpandProperty FullName | Move-Item -Force -Destination "{dst}"
+    Write-Host "Sleeping 3 seconds..."
+    Start-Sleep -Seconds 3
+    Write-Host "Starting F95Checker..."
+    & {globals.start_cmd}
+}} catch {{
+    Write-Host "An error occurred:`n" $_.InvocationInfo.PositionMessage "`n" $_
+}}"""
             shell = [shutil.which("powershell")]
         else:
             for item in dst.iterdir():
@@ -1314,11 +1354,12 @@ async def refresh(*games: list[Game], full=False, notifs=True, force_archived=Fa
     for game in (games or globals.games.values()):
         if game.custom:
             continue
-        if not game.image.missing:
-            if not games and game.archived and not globals.settings.refresh_archived_games and not force_archived:
+        if not games:
+            if game.archived and not globals.settings.refresh_archived_games and not force_archived:
                 continue
-            if not games and game.status is Status.Completed and not globals.settings.refresh_completed_games and not force_completed:
-                continue
+            if not game.image.missing:
+                if game.status is Status.Completed and not globals.settings.refresh_completed_games and not force_completed:
+                    continue
         if len(fast_queue[-1]) == api_fast_check_max_ids:
             fast_queue.append([])
         fast_queue[-1].append(game)
@@ -1359,6 +1400,7 @@ async def download_file(download: FileDownload):
         download.path.parent.mkdir(parents=True, exist_ok=True)
         async with aiofiles.open(download.path, "wb") as file:
             download.state = download.State.Downloading
+            download.start = time.time()
 
             can_resume = None
             while True:
@@ -1386,6 +1428,7 @@ async def download_file(download: FileDownload):
                                 return
                             if chunk:
                                 download.progress += await file.write(chunk)
+                                download.current = time.time()
                     except aiohttp.ClientPayloadError as exc:
                         if "ContentLengthError" in str(exc):
                             continue
@@ -1578,7 +1621,7 @@ def open_ddl_popup(game: Game):
                     if already_downloading:
                         imgui.pop_disabled()
                         globals.gui.draw_hover_text(
-                            "This file is already downloading in F95Checker.\n"
+                            "This file is currently downloading in F95Checker.\n"
                             "You can find it in the sidebar, below the settings.",
                             text=None,
                         )

@@ -320,6 +320,8 @@ class FileDownload:
 
     cancel: bool = False
     state: State = State.Preparing
+    start: Timestamp = time.time()
+    current:  Timestamp = time.time()
     extracted: pathlib.Path = None
     error: str = None
     traceback: str = None
@@ -388,6 +390,7 @@ Status = IntEnumHack("Status", [
     ("Abandoned", (4, {"color" : (0.87, 0.20, 0.20), "icon": "close_circle"})),
     ("Unchecked", (5, {"color" : (0.50, 0.50, 0.50), "icon": "alert_circle"})),
     ("Custom",    (6, {"color" : (0.95, 0.50, 0.00), "icon": "dots_horizontal_circle"})),
+    ("Unknown",   (7, {"color" : (0.50, 0.50, 0.50), "icon": "alert_circle"})),
 ])
 
 
@@ -545,6 +548,7 @@ Tag = IntEnumHack("Tag", [
     ("voiced",                 (137, {"text": "voiced"})),
     ("vore",                   (138, {"text": "vore"})),
     ("voyeurism",              (139, {"text": "voyeurism"})),
+    ("unknown",                (154, {"text": "unknown"})),
 ])
 
 
@@ -937,6 +941,7 @@ class Settings:
 Type = IntEnumHack("Type", [
     ("ADRIFT",     (2,  {"color": colors.hex_to_rgba_0_1("#2196F3"), "category": Category.Games})),
     ("Flash",      (4,  {"color": colors.hex_to_rgba_0_1("#616161"), "category": Category.Games})),
+    ("Godot",      (31, {"color": colors.hex_to_rgba_0_1("#03A9F4"), "category": Category.Games})),
     ("HTML",       (5,  {"color": colors.hex_to_rgba_0_1("#689F38"), "category": Category.Games})),
     ("Java",       (6,  {"color": colors.hex_to_rgba_0_1("#52A6B0"), "category": Category.Games})),
     ("Others",     (9,  {"color": colors.hex_to_rgba_0_1("#8BC34A"), "category": Category.Games})),
@@ -965,6 +970,7 @@ Type = IntEnumHack("Type", [
     ("Tutorial",   (18, {"color": colors.hex_to_rgba_0_1("#EC5555"), "category": Category.Misc})),
     ("Misc",       (1,  {"color": colors.hex_to_rgba_0_1("#B8B00C"), "category": Category.Misc})),
     ("Unchecked",  (23, {"color": colors.hex_to_rgba_0_1("#393939"), "category": Category.Misc})),
+    ("Unknown",    (32, {"color": colors.hex_to_rgba_0_1("#393939"), "category": Category.Misc})),
 ])
 
 
@@ -1073,16 +1079,22 @@ class Game:
                     if base in exe.parents:
                         self.executables[i] = exe.relative_to(base).as_posix()
                         changed = True
-                    executables_valids.append(exe.is_file())
+                    executables_valids.append(exe.is_file() or (globals.os is Os.MacOS and exe.suffix == ".app" and exe.is_dir()))
                 else:
-                    executables_valids.append((base / exe).is_file())
+                    abs_exe = base / exe
+                    executables_valids.append(abs_exe.is_file() or (globals.os is Os.MacOS and abs_exe.suffix == ".app" and abs_exe.is_dir()))
             self.executables_valids = executables_valids
             if changed:
                 from external import async_thread
                 from modules import db
                 async_thread.run(db.update_game(self, "executables"))
         else:
-            self.executables_valids = [utils.is_uri(executable) or os.path.isfile(executable) for executable in self.executables]
+            def _exe_valid(executable):
+                if utils.is_uri(executable):
+                    return True
+                exe = pathlib.Path(executable)
+                return exe.is_file() or (globals.os is Os.MacOS and exe.suffix == ".app" and exe.is_dir())
+            self.executables_valids = [_exe_valid(e) for e in self.executables]
         self.executables_valid = all(self.executables_valids)
         if globals.gui:
             globals.gui.recalculate_ids = True

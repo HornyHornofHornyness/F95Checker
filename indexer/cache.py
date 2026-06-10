@@ -59,7 +59,17 @@ NAME_FORMAT = "thread:{id}"
 async def lifespan():
     global redis
     redis = aredis.Redis(decode_responses=True)
-    await redis.ping()
+
+    retries = 7
+    while retries:
+        retries -= 1
+        try:
+            await redis.ping()
+            break
+        except aredis.BusyLoadingError:
+            if not retries:
+                raise
+            await asyncio.sleep(5)
 
     try:
         yield
