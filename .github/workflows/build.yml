@@ -97,26 +97,6 @@ jobs:
           Prefix = ../../../Resources/lib/PyQt6/Qt6
           EOF
 
-      - name: "Resolve symlinks (Linux, macOS)"
-        if: "runner.os != 'Windows'"
-        run: |
-          cd ./dist/
-          find ./ -type l -exec echo Resolving {} \; -exec sed -i '' {} \;
-
-      # - name: "Import codesign certificate (macOS)"
-      #   if: "runner.os == 'macOS'"
-      #   uses: "apple-actions/import-codesign-certs@v7"
-      #   with:
-      #     p12-file-base64: "${{ secrets.CODESIGN_P12_BASE64 }}"
-      #     p12-password: "${{ secrets.CODESIGN_P12_PASSWORD }}"
-
-      # - name: "Codesign (macOS)"
-      #   if: "runner.os == 'macOS'"
-      #   run: |
-      #     cd ./dist/
-      #     find ./ -type f -empty -delete
-      #     codesign -s "${{ secrets.CODESIGN_P12_NAME }}" --deep ./*.app
-
       - name: "Bundle astcenc+compressonator (Windows)"
         if: "runner.os == 'Windows'"
         shell: bash
@@ -159,6 +139,26 @@ jobs:
           7z x astcenc-universal.zip
           mkdir $(echo ./dist/*.app)/Contents/Resources/lib/astcenc/
           mv ./bin/astcenc ./dist/*.app/Contents/Resources/lib/astcenc/
+
+      - name: "Resolve symlinks (Linux)"
+        if: "runner.os == 'Linux'"
+        run: |
+          cd ./dist/
+          find ./ -type l -exec echo Resolving {} \; -exec sed -i '' {} \;
+
+      # - name: "Import codesign certificate (macOS)"
+      #   if: "runner.os == 'macOS'"
+      #   uses: "apple-actions/import-codesign-certs@v7"
+      #   with:
+      #     p12-file-base64: "${{ secrets.CODESIGN_P12_BASE64 }}"
+      #     p12-password: "${{ secrets.CODESIGN_P12_PASSWORD }}"
+
+      # - name: "Codesign (macOS)"
+      #   if: "runner.os == 'macOS'"
+      #   run: |
+      #     cd ./dist/
+      #     find ./ -type f -empty -delete
+      #     codesign -s "${{ secrets.CODESIGN_P12_NAME }}" --deep ./*.app
 
       # === ARTIFACT ===
 

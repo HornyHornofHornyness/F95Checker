@@ -898,7 +898,6 @@ class Settings:
     quick_filters               : bool
     refresh_archived_games      : bool
     refresh_completed_games     : bool
-    render_when_unfocused       : bool
     request_timeout             : int
     rpc_enabled                 : bool
     rpdl_password               : str

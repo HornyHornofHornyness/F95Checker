@@ -1,19 +1,19 @@
 ### Added:
-- Right click option on Refresh button to manually check app updates (by @WillyJL)
-- Add Cmd+W shortcut to close window on macOS (#268 by @cantunborn)
+- Nothing
 
 ### Updated:
-- Show download size and speed in Donor DDL progress bar (#271 by @FaceCrap & @WillyJL)
+- Nothing
 
 ### Fixed:
-- Fix updating on Windows when the app closes faster than Powershell starts (by @WillyJL)
-- Detect unsupported configurations with app data and app install locations overlapping (by @WillyJL)
-- Fix horizontal scrolling in more info popup (by @WillyJL)
-- Fix webview blank page on macOS (#269 by @cantunborn)
-- Fix bundled compressonator on Linux (by @WillyJL)
+- Don't draw continuously while focused unless necessary (by @WillyJL)
+- Fix symbolic links in auto update (by @WillyJL)
+- Pick correct macOS update file if on x64 (by @WillyJL)
 
 ### Removed:
-- Nothing
+- Removed "Interface > Render if unfocused" setting:
+  - Doesn't make sense anymore
+  - Previously it would always draw when focused, and always draw when unfocused if this setting was on
+  - Now, both when focused and unfocused, it will draw only if necessary, eg mouse moved, GIF is playing...
 
 ### Known Issues:
 - The new notification-daemon process on Linux can sometimes get stuck spinning and cause the app to crash

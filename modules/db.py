@@ -240,7 +240,6 @@ async def connect():
             "quick_filters":               f'INTEGER DEFAULT {int(True)}',
             "refresh_archived_games":      f'INTEGER DEFAULT {int(True)}',
             "refresh_completed_games":     f'INTEGER DEFAULT {int(True)}',
-            "render_when_unfocused":       f'INTEGER DEFAULT {int(True)}',
             "request_timeout":             f'INTEGER DEFAULT 30',
             "rpc_enabled":                 f'INTEGER DEFAULT {int(True)}',
             "rpdl_password":               f'TEXT    DEFAULT ""',

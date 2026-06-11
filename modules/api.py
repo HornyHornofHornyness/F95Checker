@@ -7,11 +7,13 @@ import io
 import json
 import os
 import pathlib
+import platform
 import re
 import shlex
 import shutil
 import socket
 import ssl
+import stat
 import sys
 import tempfile
 import time
@@ -861,20 +863,24 @@ async def full_check(game: Game, last_changed: int):
             url = f95_threads_page + str(game.id)
 
         # Redis only allows string values, so API only gives str for simplicity
-        thread["type"] = int(thread["type"])
-        if thread["type"] in Type:
-            thread["type"] = Type(thread["type"])
-        else:
+        try:
+            thread["type"] = Type(int(thread["type"]))
+        except ValueError:
             thread["type"] = Type.Unknown
-        thread["status"] = int(thread["status"])
-        if thread["status"] in Status:
-            thread["status"] = Status(thread["status"])
-        else:
+        try:
+            thread["status"] = Status(int(thread["status"]))
+        except ValueError:
             thread["status"] = Status.Unknown
         thread["last_updated"] = int(thread["last_updated"])
         thread["score"] = float(thread["score"])
         thread["votes"] = int(thread["votes"])
-        thread["tags"] = tuple((Tag(tag) if tag in Tag else Tag.unknown) for tag in json.loads(thread["tags"]))
+        thread["tags"] = json.loads(thread["tags"])
+        for i in range(len(thread["tags"])):
+            try:
+                thread["tags"][i] = Tag(thread["tags"][i])
+            except ValueError:
+                thread["tags"][i] = Tag.unknown
+        thread["tags"] = tuple(thread["tags"])
         thread["unknown_tags"] = json.loads(thread["unknown_tags"])
         thread["downloads"] = json.loads(thread["downloads"])
         for _, links in thread["downloads"]:
@@ -1158,6 +1164,8 @@ async def check_updates():
         asset_name = None
         asset_size = None
         asset_type = globals.os.name.lower() if globals.frozen else "source"
+        if globals.frozen and globals.os is Os.MacOS:
+            asset_type += "-arm64" if platform.machine().lower() == "arm64" else "-x64"
         for asset in res["assets"]:
             if asset_type in asset["name"].lower():
                 asset_url = asset["browser_download_url"]
@@ -1236,9 +1244,17 @@ async def check_updates():
                 if cancel:
                     shutil.rmtree(asset_path, ignore_errors=True)
                     return
-                extracted = z.extract(file, asset_path)
-                if (attr := file.external_attr >> 16) != 0:
-                    os.chmod(extracted, attr)
+                mode = file.external_attr >> 16
+                if (mode & stat.S_IFLNK) == stat.S_IFLNK:
+                    extracted = asset_path / file.filename
+                    symlink = z.read(file).decode()
+                    os.symlink(symlink, extracted)
+                    if hasattr(os, "lchmod"):
+                        os.lchmod(extracted, mode)
+                else:
+                    extracted = z.extract(file, asset_path)
+                    if mode != 0:
+                        os.chmod(extracted, mode)
                 progress += 1
         progress = 5.0
         total = 5.0
